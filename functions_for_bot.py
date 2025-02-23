@@ -21,11 +21,15 @@ def dict_to_datetime(user_input_datetime: dict):
 def get_weather(city_name="Москва"):
     # URL для запроса текущей погоды
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={API_KEY_WEATHER}&units=metric&lang=ru"
-
+    url_uvi = f"http://api.openweathermap.org/data/2.5/uvi?lat={55.7522}&lon={37.6156}&appid={API_KEY_WEATHER}"
     try:
         # Отправляем GET-запрос
         response = requests.get(url)
-        data = response.json()  # Парсим JSON-ответ
+        response_uvi = requests.get(url_uvi)
+
+        # Парсим JSON-ответ
+        data = response.json()
+        data_uvi = response_uvi.json()
 
         # Проверяем, успешен ли запрос
         if data["cod"] != 200:
@@ -39,6 +43,7 @@ def get_weather(city_name="Москва"):
         feels_like = data["main"]["feels_like"]
         temp_min = data["main"]["temp_min"]
         temp_max = data["main"]["temp_max"]
+        uvi = data_uvi["value"]
 
         url_1 = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
         response = requests.get(url_1)
@@ -56,8 +61,9 @@ def get_weather(city_name="Москва"):
             f"Температура на протяжение дня: {temp_min} ... {temp_max}\n"
             f"Скорость ветра: {wind_speed} м/с\n"
             f"Ощущается как: {feels_like}\n"
-            f"🧲Магнитные бури: {max_k_index}🧲")
-
+            f"🧲Магнитные бури: {max_k_index}🧲\n"
+            f"🌞Ультрафиолетовое излучение: {uvi}🌞"
+        )
         return result
 
     except Exception as e:

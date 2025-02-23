@@ -15,7 +15,6 @@ from functions_for_bot import dict_to_datetime, get_weather
 API_TOKEN = API_TOKEN
 bot = telebot.TeleBot(API_TOKEN)
 
-user_message_status = {}
 # 932802232 Liykin_id
 user_input_datetime = {
     'year': '',
@@ -23,14 +22,18 @@ user_input_datetime = {
     'day': '',
     'time': '',
 }
-
-
-
+user_message_status = {}
+class UserState:
+    WAITING = "waiting",
+    WAITING_FOR_PASSWORD = "waiting_for_password",
+    WAITING_FOR_NOTIFICATION_TEXT = "waiting_for_notification_text",
+    WAITING_FOR_SENDER_TEXT = "waiting_for_sender_text",
+    WAITING_FOR_NUMBER_TO_DELETE = "waiting_for_number_to_delete",
 @bot.message_handler(commands=['admin'])
 def admin_password(message):
-    print('ADMINKA WORKS')
     if ADMIN_CHAT_ID == message.chat.id:
         user_id = message.chat.id
+        user_message_status[user_id] = UserState.WAITING_FOR_PASSWORD
         msg = 'Здарова бурыч, мне нужен, пароль'
         bot.send_message(user_id, msg)
         bot.register_next_step_handler(message, check_password)
@@ -41,7 +44,7 @@ def admin_password(message):
 @bot.message_handler(commands=['start', 'menu'])
 def main_menu(message):
     user_id = message.chat.id
-    print(user_id)
+    user_message_status[user_id] = UserState.WAITING
     user_message_status[user_id] = 'AWAIT'
     print(user_message_status)
     print(message.chat.id, message.chat.first_name, message.chat.last_name, message.chat.username)
@@ -110,24 +113,21 @@ def add_notifications(callback_query):
         bot.send_message(user_id, 'Список дел пуст')
     else:
         bot.send_message(user_id, db_message)
-        user_message_status[user_id] = 'AWAIT MESSAGE TO DELETE NOTIFICATION'
+        user_message_status[user_id] = UserState.WAITING_FOR_NUMBER_TO_DELETE
 
 
-@bot.message_handler(content_types='text')
+@bot.message_handler(func=lambda message: user_message_status.get(message.chat.id) == UserState.WAITING_FOR_NUMBER_TO_DELETE)
 def delete_notification_input(message):
     user_id = message.chat.id
-    if user_message_status[user_id] == 'AWAIT MESSAGE TO DELETE NOTIFICATION':
-        db = next(get_db())
-        db.query(Notification).filter(
-            and_(
-                Notification.id == int(message.text),
-                Notification.user_chat_id == user_id
-            )).delete()
-        db.commit()
-        bot.send_message(user_id, f'Уведомление удалено')
-    else:
-        notification_text_input(message)
-    user_message_status[user_id] = 'AWAIT'
+    db = next(get_db())
+    db.query(Notification).filter(
+        and_(
+            Notification.id == int(message.text),
+            Notification.user_chat_id == user_id
+        )).delete()
+    db.commit()
+    bot.send_message(user_id, f'Уведомление удалено')
+    user_message_status[user_id] = UserState.WAITING
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('button_year'))
@@ -196,67 +196,63 @@ def get_day(callback_query):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('time'))
 def get_day(callback_query):
-    user_message_status[callback_query.from_user.id] = 'AWAIT_NOTIFICATION_TEXT'
+    user_message_status[callback_query.from_user.id] = UserState.WAITING_FOR_NOTIFICATION_TEXT
     user_input_datetime['time'] = DATE['time'][int(callback_query.data[len('time'):])]
     print(user_input_datetime)
     bot.send_message(callback_query.from_user.id, "Введи текст уведомления")
-    print('ОТРАБАТЫВАЮ+++++++++++++++++++++++++++++++++++++++++')
     print(user_message_status)
 
 
-@bot.message_handler(content_types='text')
+@bot.message_handler(func=lambda message: user_message_status.get(message.chat.id) == UserState.WAITING_FOR_NOTIFICATION_TEXT)
 def notification_text_input(message):
     user_id = message.chat.id
-    if user_message_status[user_id] == 'AWAIT_NOTIFICATION_TEXT':
-        db = next(get_db())
-        user = db.execute(select(User).where(User.chat_id == user_id)).scalar_one_or_none()
-        if user:
-            # Создаем новое уведомление
-            new_notification = Notification(
-                notification_text=message.text,
-                date=dict_to_datetime(user_input_datetime),
-                user=user
-            )
-            print(f'{message.text}++++++++++++++')
-            print(user)
-            # Добавляем уведомление в сессию
-            db.add(new_notification)
-            db.commit()
-        user_message_status[user_id] = 'AWAIT'
-        bot.send_message(user_id, f"Внес уведомление!")
-    else:
-        pass
+    db = next(get_db())
+    user = db.execute(select(User).where(User.chat_id == user_id)).scalar_one_or_none()
+    if user:
+        # Создаем новое уведомление
+        new_notification = Notification(
+            notification_text=message.text,
+            date=dict_to_datetime(user_input_datetime),
+            user=user
+        )
+        print(f'{message.text}++++++++++++++')
+        print(user)
+        # Добавляем уведомление в сессию
+        db.add(new_notification)
+        db.commit()
+    user_message_status[user_id] = UserState.WAITING
+    bot.send_message(user_id, f"Внес уведомление!")
 
 
 #-----------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------
 # Панель админа с проверкой пароля для манипуляций с БД
-@bot.message_handler(content_types='text')
+@bot.message_handler(func=lambda message: user_message_status.get(message.chat.id) == UserState.WAITING_FOR_PASSWORD)
 def check_password(message):
     user_id = message.chat.id
-    if ADMIN_CHAT_ID == message.chat.id:
-        if message.text != ADMIN_PASSWORD:
-            print(message.text)
-            bot.send_message(user_id, "Пароль неверный")
-        else:
-            bot.send_message(user_id, "Пароль верный")
-            msg = 'Добро пожаловать в админку'
 
-            buttons = [
-                types.InlineKeyboardButton("⚡️Рассылка погоды  ⚡️", callback_data="WEATHER"),
-                types.InlineKeyboardButton("✅ БД USERS ✅", callback_data="БД USERS"),
-                types.InlineKeyboardButton("✅ БД NOTIFICATIONS ✅", callback_data="БД NOTIFICATIONS"),
-                types.InlineKeyboardButton("☠ Drop table USERS ☠", callback_data="Drop table USERS"),
-                types.InlineKeyboardButton("☠ Drop table NOTIFICATIONS ☠", callback_data="Drop table NOTIFICATIONS"),
-            ]
-
-            reply_markup = types.InlineKeyboardMarkup(row_width=2)
-            for button in buttons:
-                reply_markup.add(button)
-            bot.send_message(message.chat.id, msg, reply_markup=reply_markup)
+    if message.text != ADMIN_PASSWORD:
+        print(message.text)
+        bot.send_message(user_id, "Пароль неверный")
     else:
-        pass
+        bot.send_message(user_id, "Пароль верный")
+        msg = 'Добро пожаловать в админку'
+
+        buttons = [
+            types.InlineKeyboardButton("⚡️Рассылка погоды  ⚡️", callback_data="WEATHER"),
+            types.InlineKeyboardButton("❤️Радуем подписчиков❤️", callback_data="SENDER"),
+            types.InlineKeyboardButton("✅ БД USERS ✅", callback_data="БД USERS"),
+            types.InlineKeyboardButton("✅ БД NOTIFICATIONS ✅", callback_data="БД NOTIFICATIONS"),
+            types.InlineKeyboardButton("☠ Drop table USERS ☠", callback_data="Drop table USERS"),
+            types.InlineKeyboardButton("☠ Drop table NOTIFICATIONS ☠", callback_data="Drop table NOTIFICATIONS"),
+        ]
+        reply_markup = types.InlineKeyboardMarkup(row_width=2)
+        for button in buttons:
+            reply_markup.add(button)
+        bot.send_message(message.chat.id, msg, reply_markup=reply_markup)
+    user_message_status[user_id] = UserState.WAITING
+
 
 
 @bot.callback_query_handler(lambda c: c.data == 'БД USERS')
@@ -313,9 +309,27 @@ def drop_table_notifications(callback_query):
     bot.send_message(user_id, "Очистил БД NOTIFICATIONS")
 
 
-@bot.callback_query_handler(lambda c: c.data == 'WEATHER')
-def drop_table_notifications(callback_query):
+@bot.callback_query_handler(lambda c: c.data == 'SENDER')
+def sender(callback_query):
     user_id = callback_query.from_user.id
+    user_message_status[user_id] = UserState.WAITING_FOR_SENDER_TEXT
+    bot.send_message(user_id, "Введи рассылку шеф")
+
+@bot.message_handler(func=lambda message: user_message_status.get(message.chat.id) == UserState.WAITING_FOR_SENDER_TEXT)
+def sender_finisher(message):
+    user_id = message.chat.id
+    db = next(get_db())
+    all_users = db.execute(select(User)).fetchall()
+    for user in all_users:
+        user = user[0]
+        bot.send_message(user.chat_id, message.text)
+    db.close()
+    bot.send_message(user_id, "Рассылка выполнена, шеф!")
+
+
+@bot.callback_query_handler(lambda c: c.data == 'WEATHER')
+def sender(callback_query):
+    user_id = ADMIN_CHAT_ID
     response_from_weather_apis = get_weather()
     db = next(get_db())
     all_users = db.execute(select(User)).fetchall()
@@ -324,7 +338,6 @@ def drop_table_notifications(callback_query):
         bot.send_message(user.chat_id, response_from_weather_apis)
     db.close()
     bot.send_message(user_id, "Рассылка выполнена, шеф!")
-
 
 #-----------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------
@@ -354,9 +367,28 @@ def loop1():
         check_and_send_notifications()
         sleep(60)
 
-thread1 = threading.Thread(target=loop1)
-thread1.start()
+def loop2():
+    hour = 0
+    while hour != 10:
+        hour = datetime.now().hour
+        sleep(3600)
+    while True:
+        user_id = ADMIN_CHAT_ID
+        response_from_weather_apis = get_weather()
+        db = next(get_db())
+        all_users = db.execute(select(User)).fetchall()
+        for user in all_users:
+            user = user[0]
+            bot.send_message(user.chat_id, response_from_weather_apis)
+        db.close()
+        bot.send_message(user_id, "Рассылка выполнена, шеф!")
+        sleep(86400)
 
+
+thread1 = threading.Thread(target=loop1)
+thread2 = threading.Thread(target=loop2)
+thread1.start()
+thread2.start()
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -374,6 +406,9 @@ if __name__ == '__main__':
 #-----------------------------------------------------------------------------------------------------------------------
 # TODO:
 #   - Идеи для написания бота
-#   - Диалог - прикрутить чат гпт
-#   - Контроль веса
-
+#   - ультрафиолет ✅
+#   - том бд
+#   - цикл для погоды ✅
+#   - расслыка сообщений от админа
+#   - изменение клавиатуры без отправки сообщений
+#   - поменять систему статуса ожидания сообщения ботом ✅
