@@ -6,13 +6,14 @@ from models.bot_notifications_model import Notification
 from models.bot_users_model import User
 from backend.db_depends import get_db
 
-from config import API_TOKEN, DATE, ADMIN_PASSWORD, ADMIN_CHAT_ID
+from config import API_TOKEN, DATE, ADMIN_PASSWORD, ADMIN_CHAT_ID, API_TOKEN_DEV
 from time import sleep
 from datetime import datetime
 import threading
 from functions_for_bot import dict_to_datetime, get_weather
 
 API_TOKEN = API_TOKEN
+API_TOKEN_DEV = API_TOKEN_DEV
 bot = telebot.TeleBot(API_TOKEN)
 
 # 932802232 Liykin_id
